@@ -4,6 +4,6 @@
 *.7z
 *.mp3
 *.wav
-.hg/
-*.hgignore
-*.hgtags
+dist/
+*.egg-info/
+test.py

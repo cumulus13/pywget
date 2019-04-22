@@ -1,0 +1,1 @@
+from wget import *
