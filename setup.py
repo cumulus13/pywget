@@ -28,7 +28,7 @@ setup(
     packages=["pywget"],
     entry_points = {
          "console_scripts": [
-             "pywget = pywget.wget.py",
+             "pywget = pywget.wget:usage",
          ]
     },
     data_files=['__version__.py', 'README.rst', 'LICENSE.rst'],

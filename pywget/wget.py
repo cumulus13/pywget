@@ -545,7 +545,7 @@ def download(url, out=".", bar=bar_adaptive):
     return filename
 
 
-usage = """\
+usage_help = """\n\
 usage: wget.py [options] URL
 
 options:
@@ -554,9 +554,9 @@ options:
   --version
 """
 
-if __name__ == "__main__":
+def usage():
     if len(sys.argv) < 2 or "-h" in sys.argv or "--help" in sys.argv:
-        sys.exit(usage)
+        sys.exit(usage_help)
     if "--version" in sys.argv:
         sys.exit("wget.py " + __version__)
 
@@ -578,6 +578,8 @@ if __name__ == "__main__":
     print("")
     print("Saved under %s" % os.path.abspath(filename))
 
+if __name__ == "__main__":
+    usage()
 
 r"""
 features that require more tuits for urlretrieve API
