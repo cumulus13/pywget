@@ -33,6 +33,7 @@ setup(
     maintainer_email="cumulus13@gmail.com",
     description="command line wget downloader alternative, this can be module/package",
     long_description=readme,
+    long_description_content_type="text/markdown",
     packages=["pywget"],
     entry_points = {
          "console_scripts": [
