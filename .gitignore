@@ -4,6 +4,7 @@
 *.7z
 *.mp3
 *.wav
+*.bak
 dist/
 build/
 *.egg-info/

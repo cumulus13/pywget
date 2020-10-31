@@ -22,6 +22,7 @@ __version__ = "3.1"
 import sys, shutil, os
 import tempfile
 import math
+import re
 
 PY3K = sys.version_info >= (3, 0)
 if PY3K:
@@ -248,14 +249,14 @@ def filename_from_headers(headers):
     if cdtype[0].strip().lower() not in ('inline', 'attachment'):
         return None
     # several filename params is illegal, but just in case
-    fnames = [x for x in cdtype[1:] if x.strip().startswith('filename=')]
-    if len(fnames) > 1:
+    #fnames = [x for x in cdtype[1:] if x.strip().startswith('filename=')]
+    fnames = re.split('filename', cdisp)[-1]
+    fnames = re.sub("\*=|UFT-8|'|=UTF-8|UTF-8", '', fnames)
+    print("NAME:", fnames)
+    
+    if not fnames:
         return None
-    name = fnames[0].split('=')[1].strip(' \t"')
-    name = os.path.basename(name)
-    if not name:
-        return None
-    return name
+    return fnames
 
 def filename_fix_existing(filename):
     """Expands name portion of filename with numeric ' (x)' suffix to
@@ -506,9 +507,10 @@ def download(url, out=".", bar=bar_adaptive):
     # get filename for temp file in current directory
     prefix = detect_filename(url, out)
     #(fd, tmpfile) = tempfile.mkstemp(".tmp", prefix=prefix, dir=".")
-    (fd, tmpfile) = tempfile.mkstemp(".tmp", prefix=prefix, dir= outdir)
-    os.close(fd)
+    #(fd, tmpfile) = tempfile.mkstemp(".tmp", prefix=prefix, dir= outdir)
+    #os.close(fd)
     # os.unlink(tmpfile)
+    tmpfile = prefix + ".tmp"
 
     # set progress monitoring callback
     def callback_charged(blocks, block_size, total_size):
@@ -528,6 +530,7 @@ def download(url, out=".", bar=bar_adaptive):
         binurl = url
     (tmpfile, headers) = ulib.urlretrieve(binurl, tmpfile, callback)
     filename = detect_filename(url, out, headers)
+    print("filename =", filename)
     if outdir:
         #filename = outdir + "/" + filename
         filename = os.path.join(outdir, filename)
