@@ -252,7 +252,7 @@ def filename_from_headers(headers):
     #fnames = [x for x in cdtype[1:] if x.strip().startswith('filename=')]
     fnames = re.split('filename', cdisp)[-1]
     fnames = re.sub("\*=|UFT-8|'|=UTF-8|UTF-8", '', fnames)
-    print("NAME:", fnames)
+    #print("NAME:", fnames)
     
     if not fnames:
         return None
@@ -530,7 +530,6 @@ def download(url, out=".", bar=bar_adaptive):
         binurl = url
     (tmpfile, headers) = ulib.urlretrieve(binurl, tmpfile, callback)
     filename = detect_filename(url, out, headers)
-    print("filename =", filename)
     if outdir:
         #filename = outdir + "/" + filename
         filename = os.path.join(outdir, filename)
