@@ -5,7 +5,7 @@ command line wget downloader alternative, this can be module/package
 
 
 Installing
-----------
+------------
 
 Install and update using `pip`_:
 
@@ -38,13 +38,13 @@ or run on terminal
     $ python wget.py "http://www.test.com/test.tar.gz" -p /home/root/Downloads
     
 Support
-------
+---------
 
 *   Python 2.7 +, Python 3.x
 *   Windows, Linux
 
 Links
------
+------
 
 *   License: `BSD <https://bitbucket.org/licface/pywget/src/default/LICENSE.rst>`_
 *   Code: https://bitbucket.org/licface/pywget
