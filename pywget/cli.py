@@ -15,10 +15,11 @@ import getpass
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .__version__ import __version__
 from .client import ServerClient
@@ -29,10 +30,17 @@ from .config import (
     DEFAULT_PORT,
     ServerConfig,
     config_dir,
-    load_token,
+    config_file_path,
+    generate_token,
+    load_config,
+    resolve_token,
+    save_token,
+    token_path,
+    validate_token,
+    write_default_config,
 )
 from .core import Downloader, Options
-from .errors import PywgetError
+from .errors import ConfigError, PywgetError
 from .progress import ProgressBar
 from .utils import build_headers, format_size
 
@@ -49,12 +57,14 @@ other commands (pywget COMMAND -h):
   agent   run a relay that forwards links to an upstream server
   send    send links to a server/agent ("c" = clipboard, or a text file of links)
   jobs    list / show / pause / resume / cancel / retry / remove server jobs
+  token   show / new / set / path   - the API token (auto-generated on first serve)
+  config  path / init / show        - the optional config file (config.ini)
 
 exit codes: 0 ok | 2 bad usage/URL | 3 network | 4 HTTP status | 5 checksum
             6 storage/I-O | 7 server/agent error | 130 interrupted
 """
 
-COMMANDS = ("serve", "agent", "send", "jobs")
+COMMANDS = ("serve", "agent", "send", "jobs", "token", "config")
 
 
 # ----------------------------------------------------------------- shared bits
@@ -161,6 +171,125 @@ def _client(args: argparse.Namespace) -> ServerClient:
     )
 
 
+# ------------------------------------------------------------------ config file
+
+
+def _bool(value: str) -> bool:
+    low = value.strip().lower()
+    if low in ("1", "true", "yes", "on"):
+        return True
+    if low in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"not a boolean: {value!r}")
+
+
+def _list(value: str) -> List[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+Spec = Dict[str, Tuple[str, Callable[[str], Any]]]
+
+DOWNLOAD_SPEC: Spec = {
+    "path": ("path", str), "connections": ("connections", int), "retries": ("retries", int),
+    "timeout": ("timeout", float), "limit_rate": ("limit_rate", str), "user_agent": ("user_agent", str),
+    "proxy": ("proxy", str), "ca_cert": ("ca_cert", str),
+}
+CLIENT_SPEC: Spec = {
+    "server": ("server", str), "verify": ("server_no_check_certificate", lambda v: not _bool(v)),
+    "ca_cert": ("server_ca_cert", str),
+}
+_COMMON_SERVER: Spec = {
+    "host": ("host", str), "port": ("port", int), "state_dir": ("state_dir", str),
+    "max_jobs": ("max_jobs", int), "allowed_host": ("allowed_host", _list),
+    "tls_cert": ("tls_cert", str), "tls_key": ("tls_key", str), "ui": ("no_ui", lambda v: not _bool(v)),
+}
+SERVE_SPEC: Spec = dict(_COMMON_SERVER, **{
+    "root": ("root", str), "connections": ("connections", int), "retries": ("retries", int),
+    "limit_rate": ("limit_rate", str), "deny_private_networks": ("deny_private_networks", _bool),
+})
+AGENT_SPEC: Spec = dict(_COMMON_SERVER, **{
+    "upstream": ("upstream", str), "upstream_token": ("upstream_token", str),
+    "upstream_verify": ("upstream_no_check_certificate", lambda v: not _bool(v)),
+    "upstream_ca_cert": ("upstream_ca", str),
+})
+
+
+def _apply_config(parser: argparse.ArgumentParser, section: str, spec: Spec) -> None:
+    """Make config-file values the parser defaults (command line still wins)."""
+    values = load_config().get(section, {})
+    unknown = sorted(set(values) - set(spec))
+    if unknown:
+        raise ConfigError(
+            f"unknown option(s) in [{section}] of {config_file_path()}: {', '.join(unknown)}"
+        )
+    defaults: Dict[str, Any] = {}
+    for key, raw in values.items():
+        dest, convert = spec[key]
+        if raw == "":
+            continue
+        try:
+            defaults[dest] = convert(raw)
+        except ValueError:
+            raise ConfigError(f"invalid value for [{section}] {key} in {config_file_path()}: {raw!r}") from None
+    parser.set_defaults(**defaults)
+
+
+def _config_main(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog="pywget config", description="Manage the optional config file.")
+    p.add_argument("action", choices=["path", "init", "show"])
+    p.add_argument("--force", action="store_true", help="init: overwrite an existing file")
+    args = p.parse_args(argv)
+    path = config_file_path()
+    if args.action == "path":
+        print(path)
+    elif args.action == "init":
+        print(write_default_config(args.force))
+    else:
+        if not path.exists():
+            print(f"(no config file; create one with: pywget config init)  [{path}]", file=sys.stderr)
+            return 0
+        shown = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key = line.split("=", 1)[0].strip().lower()
+            shown.append(f"{key} = ********" if key == "upstream_token" and "=" in line else line)
+        print("\n".join(shown))
+    return 0
+
+
+def _token_main(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog="pywget token",
+        description="Manage the API token (stored in the token file, mode 0600).",
+    )
+    p.add_argument("action", choices=["show", "new", "set", "path"])
+    p.add_argument("value", nargs="?", help="set: the token to use ('-' = read from stdin)")
+    p.add_argument("--length", type=int, default=32, metavar="BYTES", help="new: random bytes (default 32)")
+    args = p.parse_args(argv)
+    if args.action == "path":
+        print(token_path())
+        return 0
+    if args.action == "show":
+        token, source = resolve_token()
+        if not token:
+            print("no token yet: it is generated the first time you run 'pywget serve' (or run 'pywget token new')",
+                  file=sys.stderr)
+            return 1
+        print(f"token source: {source}", file=sys.stderr)
+        print(token)
+        return 0
+    if args.action == "new":
+        token = generate_token(args.length)
+    else:
+        if not args.value:
+            p.error("'set' needs a value (or '-' to read stdin)")
+        token = (sys.stdin.readline() if args.value == "-" else args.value).strip()
+        validate_token(token)
+    path = save_token(token)
+    print(token)
+    print(f"saved to {path}; restart 'pywget serve' / 'pywget agent' to apply it", file=sys.stderr)
+    return 0
+
+
 # ------------------------------------------------------------- direct download
 
 
@@ -223,6 +352,7 @@ def _build_options(args: argparse.Namespace, progress: Optional[ProgressBar]) ->
 
 def _download_main(argv: List[str]) -> int:
     parser = build_parser()
+    _apply_config(parser, "download", DOWNLOAD_SPEC)
     args = parser.parse_args(argv)
     try:
         urls = _expand_inputs(args.urls, args.input_file)
@@ -300,12 +430,19 @@ def _job_specs(args: argparse.Namespace, urls: List[str]) -> List[Dict[str, Any]
     return specs
 
 
+def _clip(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: max(width - 2, 1)] + ".."
+
+
 def _fmt_job(job: Dict[str, Any]) -> str:
+    cols = shutil.get_terminal_size((100, 24)).columns
     pct = f"{job['percent']:5.1f}%" if job.get("percent") is not None else "   --%"
     speed = f"{format_size(job['speed'])}/s" if job.get("status") == "running" else ""
-    label = job.get("result_path") or job.get("filename") or job["url"]
-    err = f"  ! {job['error']}" if job.get("error") else ""
-    return f"{job['id']}  {job['status']:<9} {pct} {speed:>11}  {label}{err}"
+    prefix = f"{job['id']}  {job['status']:<9} {pct} {speed:>11}  "
+    line = prefix + _clip(job.get("name") or job["url"], max(20, cols - len(prefix) - 1))
+    if job.get("error"):
+        line += "\n    ! " + _clip(job["error"], max(20, cols - 8))
+    return line
 
 
 def _forward(args: argparse.Namespace, urls: List[str], parser: argparse.ArgumentParser) -> int:
@@ -329,7 +466,7 @@ def _forward(args: argparse.Namespace, urls: List[str], parser: argparse.Argumen
                 last = [""]
 
                 def show(j: Dict[str, Any], last: List[str] = last) -> None:
-                    line = _fmt_job(j)
+                    line = _fmt_job(j).split("\n")[0]
                     if not quiet and line != last[0] and sys.stderr.isatty():
                         sys.stderr.write("\r" + line + " " * max(0, len(last[0]) - len(line)))
                         sys.stderr.flush()
@@ -368,6 +505,7 @@ def _send_main(argv: List[str]) -> int:
     p.add_argument("-q", "--quiet", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--json", action="store_true", help="print jobs as JSON on stdout")
+    _apply_config(p, "client", CLIENT_SPEC)
     args = p.parse_args(argv)
     try:
         urls = _expand_inputs(args.urls, args.input_file)
@@ -392,6 +530,7 @@ def _jobs_main(argv: List[str]) -> int:
     p.add_argument("--status", help="filter for 'list' (queued, running, paused, completed, failed, cancelled)")
     p.add_argument("--json", action="store_true")
     _add_server_args(p)
+    _apply_config(p, "client", CLIENT_SPEC)
     args = p.parse_args(argv)
     if args.action not in ("list", "stats") and not args.job_id:
         p.error(f"'{args.action}' needs a job id")
@@ -436,7 +575,7 @@ def _serve_main(argv: List[str], agent: bool) -> int:
     p.add_argument("--port", type=int, default=DEFAULT_AGENT_PORT if agent else DEFAULT_PORT, help="TCP port")
     p.add_argument("--token", help="API token (default: $PYWGET_TOKEN, token file, or generated)")
     if agent:
-        p.add_argument("--upstream", required=True, metavar="URL", help="server to forward links to")
+        p.add_argument("--upstream", metavar="URL", help="server to forward links to (or 'upstream' in [agent])")
         p.add_argument("--upstream-token", metavar="TOKEN", help="token of the upstream server")
         p.add_argument("--upstream-no-check-certificate", action="store_true")
         p.add_argument("--upstream-ca-cert", metavar="FILE")
@@ -456,13 +595,16 @@ def _serve_main(argv: List[str], agent: bool) -> int:
     p.add_argument("--tls-key", metavar="FILE")
     p.add_argument("--no-ui", action="store_true", help="disable the web UI")
     p.add_argument("-v", "--verbose", action="store_true")
+    _apply_config(p, "agent" if agent else "serve", AGENT_SPEC if agent else SERVE_SPEC)
     args = p.parse_args(argv)
+    if agent and not args.upstream:
+        p.error("--upstream is required (or set 'upstream' in the [agent] section of the config file)")
     _setup_logging(args.verbose)
     _install_signals()
     try:
-        token = load_token(args.token, create=True)
+        token, token_source = resolve_token(args.token, create=True)
         kwargs: Dict[str, Any] = dict(
-            host=args.host, port=args.port, token=token or "", max_jobs=args.max_jobs,
+            host=args.host, port=args.port, token=token or "", token_source=token_source, max_jobs=args.max_jobs,
             allowed_hosts=args.allowed_host, tls_cert=args.tls_cert, tls_key=args.tls_key, ui=not args.no_ui,
         )
         if args.state_dir:
@@ -500,14 +642,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in COMMANDS:
         command, rest = args[0], args[1:]
-        if command == "serve":
-            return _serve_main(rest, agent=False)
-        if command == "agent":
-            return _serve_main(rest, agent=True)
-        if command == "send":
-            return _send_main(rest)
-        return _jobs_main(rest)
-    return _download_main(args)
+        try:
+            if command == "serve":
+                return _serve_main(rest, agent=False)
+            if command == "agent":
+                return _serve_main(rest, agent=True)
+            if command == "send":
+                return _send_main(rest)
+            if command == "token":
+                return _token_main(rest)
+            if command == "config":
+                return _config_main(rest)
+            return _jobs_main(rest)
+        except ConfigError as exc:
+            print(f"pywget: error: {exc}", file=sys.stderr)
+            return exc.exit_code
+    try:
+        return _download_main(args)
+    except ConfigError as exc:
+        print(f"pywget: error: {exc}", file=sys.stderr)
+        return exc.exit_code
 
 
 if __name__ == "__main__":  # pragma: no cover

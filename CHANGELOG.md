@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.6
+
+### Added
+- Optional config file (`pywget config path|init|show`, `config.ini`: `[download] [client] [serve] [agent]`).
+- `pywget token show|new|set|path`; tokens are validated (16-256 chars, header-safe).
+- Adaptive concurrency: HTTP 429 on parallel segments reduces connections instead of failing the job.
+
+### Changed
+- Messages, logs and `jobs list` no longer print full URLs (signed query strings are hidden); `jobs list`
+  is clipped to the terminal width, errors go on a second line; jobs expose a `name` field.
+- Agent: `--upstream` may come from the config file.
+
+### Fixed
+- Windows CI: `test_agent_waits_for_offline_upstream` polls instead of sleeping (refused connections take ~2 s there).
+- Lint: no trailing whitespace.
+
 ## 2.0.3
 
 ### Added

@@ -54,6 +54,7 @@ from .utils import (
     parse_checksum,
     parse_size,
     sanitize_filename,
+    short_url,
     unique_path,
 )
 
@@ -191,6 +192,36 @@ class _Worker(threading.Thread):
             self.error = exc
 
 
+class _ConcurrencyGate:
+    """Limits simultaneous segment requests; shrinks when the server answers 429."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = max(1, limit)
+        self._active = 0
+        self._cond = threading.Condition()
+
+    def acquire(self, cancel: threading.Event) -> bool:
+        with self._cond:
+            while self._active >= self.limit:
+                if cancel.is_set():
+                    return False
+                self._cond.wait(0.2)
+            self._active += 1
+            return True
+
+    def release(self) -> None:
+        with self._cond:
+            self._active -= 1
+            self._cond.notify_all()
+
+    def shrink(self) -> bool:
+        with self._cond:
+            if self.limit > 1:
+                self.limit -= 1
+                return True
+            return False
+
+
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, NetworkError):
         return exc.retryable
@@ -252,6 +283,7 @@ class Downloader:
         self._last_report = 0.0
         self._tracker: Optional[Tracker] = None
         self.partial: Optional[Tuple[Path, Path]] = None  # (.part, .pywget) of the current download
+        self._gate = _ConcurrencyGate(self.options.connections)
         self._opener = self._build_opener()
 
     # ------------------------------------------------------------------ public
@@ -383,11 +415,11 @@ class Downloader:
         except urllib.error.URLError as exc:
             if isinstance(exc.reason, ssl.SSLCertVerificationError):
                 raise NetworkError(
-                    f"TLS certificate verification failed for {url}: {exc.reason} "
+                    f"TLS certificate verification failed for {short_url(url)}: {exc.reason} "
                     "(use --no-check-certificate or --ca-cert)",
                     retryable=False,
                 ) from None
-            raise NetworkError(f"{url}: {exc.reason}") from None
+            raise NetworkError(f"{short_url(url)}: {exc.reason}") from None
 
     def _probe(self, url: str) -> RemoteInfo:
         try:
@@ -481,6 +513,7 @@ class Downloader:
         else:
             connections = len(segments)
             log.info("resuming %s (%s already on disk)", part.name, format_size(sum(s[2] for s in segments)))
+        self._gate = _ConcurrencyGate(connections)
         tracker.set(sum(s[2] for s in segments))
         todo = [s for s in segments if s[2] < s[1] - s[0] + 1]
         workers = [
@@ -514,10 +547,14 @@ class Downloader:
     ) -> None:
         attempt = 0
         read_size = self._read_size()
+        gate = self._gate
         while not self._cancel.is_set():
             start = seg[0] + seg[2]
             if start > seg[1]:
                 return
+            if not gate.acquire(self._cancel):
+                return
+            held = True
             before = seg[2]
             try:
                 with closing(self._open(url, {"Range": f"bytes={start}-{seg[1]}"})) as resp:
@@ -539,6 +576,8 @@ class Downloader:
                             seg[2] += len(chunk)
                             tracker.add(len(chunk))
             except Exception as exc:  # noqa: BLE001
+                gate.release()
+                held = False
                 if self._cancel.is_set():
                     return
                 if not _is_retryable(exc):
@@ -546,9 +585,15 @@ class Downloader:
                 if seg[2] > before:
                     attempt = 0
                 attempt += 1
+                if isinstance(exc, HTTPStatusError) and exc.status == 429 and gate.shrink():
+                    log.warning("server limits parallel connections: reducing to %d", gate.limit)
+                    attempt -= 1  # a concurrency 429 is not a failed attempt
                 if attempt > self.options.retries:
                     raise self._final_error(exc, "segment") from (None if isinstance(exc, PywgetError) else exc)
-                self._sleep_backoff(attempt, exc, f"segment {seg[0]}-{seg[1]}")
+                self._sleep_backoff(max(attempt, 1), exc, f"segment {seg[0]}-{seg[1]}")
+            finally:
+                if held:
+                    gate.release()
 
     def _run_stream(
         self, url: str, info: RemoteInfo, part: Path, tracker: Tracker, limiter: RateLimiter

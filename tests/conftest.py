@@ -11,6 +11,7 @@ import http.server
 import os
 import re
 import threading
+import time
 
 import pytest
 
@@ -23,6 +24,8 @@ ETAG = '"abc123"'
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     flaky_left = 0
+    lock = threading.Lock()
+    active = 0
 
     def log_message(self, *args):
         pass
@@ -69,6 +72,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(NORANGE, ranges=False, head=head)
         elif path == "/cd":
             self._send(SMALL, extra={"Content-Disposition": 'attachment; filename="report final.txt"'}, head=head)
+        elif path == "/limited":  # allows ONE concurrent request, answers 429 to the rest
+            with Handler.lock:
+                Handler.active += 1
+                busy = Handler.active > 1
+            try:
+                if busy:
+                    self.send_response(429)
+                    self.send_header("Retry-After", "0")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    time.sleep(0.3)
+                    self._send(DATA, head=head)
+            finally:
+                with Handler.lock:
+                    Handler.active -= 1
         elif path == "/flaky":
             if Handler.flaky_left > 0:
                 Handler.flaky_left -= 1

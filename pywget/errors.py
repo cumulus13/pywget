@@ -46,8 +46,10 @@ class HTTPStatusError(NetworkError):
         reason: str = "",
         retry_after: Optional[float] = None,
     ) -> None:
+        from .utils import short_url  # lazy: utils imports this module
+
         text = f"HTTP {status} {reason}".strip()
-        super().__init__(f"{text} for {url}", retryable=status in RETRY_STATUS)
+        super().__init__(f"{text} for {short_url(url)}", retryable=status in RETRY_STATUS)
         self.status = status
         self.url = url
         self.retry_after = retry_after
@@ -74,3 +76,9 @@ class ServerError(PywgetError):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+
+
+class ConfigError(PywgetError):
+    """Invalid configuration file or token."""
+
+    exit_code = 2

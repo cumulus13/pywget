@@ -35,7 +35,7 @@ function cell(tr,text,cls){const td=document.createElement('td');td.textContent=
 async function refresh(){try{const[s,j]=await Promise.all([api('GET','/api/v1/stats'),api('GET','/api/v1/jobs')]);
 $('mode').textContent=s.mode;$('stats').textContent=fmt(s.speed)+'/s';$('msg').textContent='';const body=$('rows');body.replaceChildren();
 for(const x of j.jobs.slice().reverse()){const tr=document.createElement('tr');
-const name=x.result_path?x.result_path.split(/[\\\\/]/).pop():(x.filename||x.url);cell(tr,name,'n').title=x.url;
+const name=x.name||x.url;cell(tr,name,'n').title=x.url;
 cell(tr,x.status+(x.error?' - '+x.error:''));const td=document.createElement('td');const pr=document.createElement('progress');pr.max=100;pr.value=x.percent||0;td.appendChild(pr);td.append(' '+(x.percent!=null?x.percent+'%':''));tr.appendChild(td);
 cell(tr,x.status==='running'?fmt(x.speed)+'/s':'-','mut');const act=document.createElement('td');
 const btn=(label,fn)=>{const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{await fn();refresh()}catch(e){$('msg').textContent=e.message}};act.appendChild(b)};

@@ -197,3 +197,14 @@ def build_headers(
         if not name or any(c in name + value for c in "\r\n\x00") or ":" in name:
             raise ValueError(f"invalid header: {name!r}")
     return merged
+
+
+def short_url(url: str, limit: int = 70) -> str:
+    """``host/../file.zip`` - no query string (it often holds signed tokens), bounded length."""
+    parts = urlsplit(url)
+    name = unquote(parts.path.rsplit("/", 1)[-1]) or "/"
+    host = parts.hostname or ""
+    room = max(limit - len(host) - 5, 12)
+    if len(name) > room:
+        name = name[: room - 12] + ".." + name[-10:]
+    return f"{host}/../{name}" if parts.path.count("/") > 1 else f"{host}/{name}".rstrip("/")

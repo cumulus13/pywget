@@ -307,6 +307,8 @@ def run_server(cfg: ServerConfig) -> int:
     import sys
 
     print(f"pywget {kind} listening on {handle.url}", file=sys.stderr)
+    if cfg.token_source:
+        print(f"api token: {cfg.token_source}  (show it with: pywget token show)", file=sys.stderr)
     if cfg.is_agent:
         print(f"forwarding links to {cfg.upstream}", file=sys.stderr)
     else:

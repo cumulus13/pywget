@@ -161,6 +161,58 @@ Errors derive from `pywget.PywgetError` (`InvalidURLError`, `NetworkError`,
 `HTTPStatusError`, `ChecksumError`, `StorageError`, `DownloadCancelled`).
 A `Downloader` runs one download at a time - use one instance per thread.
 
+## Configuration and API token
+
+### Config file (optional)
+
+There is no config file unless you create one; every option also has a command-line flag.
+
+```bash
+pywget config path     # where it lives
+pywget config init     # write a fully commented template there (mode 0600)
+pywget config show
+```
+
+| OS | Default location |
+|----|------------------|
+| Windows | `%APPDATA%\pywget\config.ini` |
+| Linux / macOS | `~/.config/pywget/config.ini` (`$XDG_CONFIG_HOME` respected) |
+
+Override the directory with `PYWGET_CONFIG_DIR` or the file with `PYWGET_CONFIG`.
+Precedence: **command line > environment > config file > built-in defaults**.
+Sections: `[download]`, `[client]`, `[serve]`, `[agent]` (the generated template lists every key).
+Unknown keys or bad values are reported with the file path and exit code 2.
+
+```ini
+[serve]
+root = C:\DOWNLOADS
+max_jobs = 3
+connections = 2
+
+[client]
+server = http://127.0.0.1:8765
+```
+
+Job queue state lives in `<config dir>/server/jobs.json` (`agent/` for an agent); change it with `state_dir`.
+
+### API token
+
+The server and agent **always** require a token.
+
+- **Default:** on the first `pywget serve` / `pywget agent` a random 256-bit token is generated and saved to `<config dir>/token` (mode 0600). It is reused on every start, and local `send` / `jobs` commands read it automatically.
+- **Show / create / set:**
+
+```bash
+pywget token show            # print the current token and where it comes from
+pywget token new             # generate and save a new one (restart the server afterwards)
+pywget token set "my-own-secret-123"   # or: echo -n ... | pywget token set -
+pywget token path
+```
+
+- **Override order:** `--token` > `$PYWGET_TOKEN` > token file.
+- **Format:** not arbitrary text - 16 to 256 characters from `A-Z a-z 0-9 . _ ~ + / = -` (safe inside an HTTP header). Weak or malformed tokens are rejected at startup.
+- **Remote clients:** copy the token to the other machine (`pywget token set -` there, or `export PYWGET_TOKEN=...`).
+
 ## Server mode and agent
 
 Run pywget as a long-lived download manager and push links to it from anywhere - the
@@ -503,7 +555,7 @@ classDiagram
 | `pywget.server` | HTTP API, SSE, web UI hosting (`ServerHandle`, `run_server`) |
 | `pywget.jobs` | `Job`, `JobManager`, persistence, `LocalExecutor` / `RelayExecutor` |
 | `pywget.client` | `ServerClient` (used by `send`, `jobs` and the agent) |
-| `pywget.config` | Token file, config dir, `ServerConfig` |
+| `pywget.config` | Config file, token file and validation, `ServerConfig` |
 | `pywget.clipboard` | `c` input: clipboard and URL extraction |
 | `pywget.webui` | Embedded single-page web UI |
 | `pywget.wget` | Backward-compatible `wget.download()` |
@@ -512,6 +564,8 @@ classDiagram
 
 - **Probing:** one `Range: bytes=0-0` request yields size, range support, ETag, `Last-Modified` and `Content-Disposition`.
 - **Segments:** a file is split into `min(connections, size / 2 MiB)` parts; small files use one connection.
+- **Rate-limited servers:** on HTTP 429 the number of simultaneous segment requests is reduced automatically (down to 1) instead of failing the job; failed jobs keep partial data, so `pywget jobs retry ID` resumes.
+- **Output hygiene:** messages and job lists show `host/../file` only - query strings (often signed tokens) are never printed.
 - **Existing file:** same size means skipped; different size is saved as `name.1` (wget style) unless `--overwrite`.
 - **Partial files:** stored as `name.part` + `name.pywget`; removed on success. Changed remote file (size/ETag/mtime) restarts cleanly.
 - **Redirects:** only http/https; `Authorization`/`Cookie` are dropped when the origin changes.

@@ -18,7 +18,14 @@ from .config import ServerConfig
 from .core import Downloader, Options
 from .errors import DownloadCancelled, InvalidURLError, PywgetError, ServerError
 from .progress import ProgressInfo
-from .utils import RateLimiter, build_headers, normalize_url, parse_checksum, parse_size
+from .utils import (
+    RateLimiter,
+    build_headers,
+    filename_from_url,
+    normalize_url,
+    parse_checksum,
+    parse_size,
+)
 
 log = logging.getLogger("pywget.jobs")
 
@@ -82,6 +89,8 @@ class Job:
         data = self.to_dict()
         for name in _SECRET_FIELDS:
             data.pop(name, None)
+        shown = self.result_path.replace("\\", "/").rsplit("/", 1)[-1] if self.result_path else None
+        data["name"] = self.filename or shown or filename_from_url(self.url) or self.url
         data["has_auth"] = bool(self.username)
         data["has_cookie"] = bool(self.cookie)
         data["header_names"] = sorted(self.headers)
