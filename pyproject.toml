@@ -1,0 +1,118 @@
+[build-system]
+requires = [
+    "setuptools>=64",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pywget"
+dynamic = [
+    "version",
+]
+description = "Robust, resumable, multi-connection wget alternative - CLI and Python library, zero dependencies"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Hadi Cahyadi", email = "cumulus13@gmail.com" },
+]
+maintainers = [
+    { name = "cumulus13", email = "cumulus13@gmail.com" },
+]
+keywords = [
+    "wget",
+    "download",
+    "downloader",
+    "resume",
+    "multi-connection",
+    "cli",
+    "http",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: System :: Networking",
+    "Typing :: Typed",
+]
+dependencies = []
+version = "2.0.1"
+
+[project.license]
+file = "LICENSE"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "build",
+    "twine",
+]
+
+[project.urls]
+Homepage = "https://github.com/cumulus13/pywget"
+Documentation = "https://github.com/cumulus13/pywget#readme"
+Source = "https://github.com/cumulus13/pywget"
+Issues = "https://github.com/cumulus13/pywget/issues"
+Changelog = "https://github.com/cumulus13/pywget/blob/master/CHANGELOG.md"
+
+[project.scripts]
+pywget = "pywget.cli:main"
+
+[tool.setuptools]
+packages = [
+    "pywget",
+]
+
+[tool.setuptools.package-data]
+pywget = [
+    "py.typed",
+]
+
+[tool.setuptools.dynamic.version]
+attr = "pywget.__version__.__version__"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "B",
+    "UP",
+]
+ignore = [
+    "E501",
+    "UP006",
+    "UP007",
+    "UP035",
+    "UP045",
+    "B904",
+]
+
+[tool.mypy]
+python_version = "3.8"
+ignore_missing_imports = true
+warn_unused_ignores = true

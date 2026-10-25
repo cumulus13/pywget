@@ -1,14 +1,4 @@
-*.pyc
-*.zip
-*.rar
-*.7z
-*.mp3
-*.wav
-*.bak
-dist/
-build/
-*.egg-info/
-test.py
+
 # Ignore Sublime Text project files
 *.sublime-project
 *.sublime-workspace
