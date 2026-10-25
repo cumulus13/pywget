@@ -228,8 +228,12 @@ def test_agent_waits_for_offline_upstream(tmp_path, server):
     with ServerHandle(agent_cfg) as agent:
         ac = client_for(agent, "a" * 40)
         job = ac.submit({"url": server + "/small.txt"})[0]
-        time.sleep(1.5)
+        # Windows needs ~2s per refused connection attempt, so poll instead of a fixed sleep
+        deadline = time.time() + 20
         current = ac.get(job["id"])
+        while time.time() < deadline and "upstream unavailable" not in (current["error"] or ""):
+            time.sleep(0.2)
+            current = ac.get(job["id"])
         assert current["status"] == "running" and "upstream unavailable" in (current["error"] or "")
         ac.action(job["id"], "cancel")
         assert wait_for(ac, job["id"], {"cancelled"})["status"] == "cancelled"
