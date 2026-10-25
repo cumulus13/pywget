@@ -46,7 +46,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = []
-version = "2.0.1"
+version = "2.0.2"
 
 [project.license]
 file = "LICENSE"

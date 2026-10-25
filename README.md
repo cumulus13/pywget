@@ -287,8 +287,6 @@ ruff check pywget tests && mypy pywget
 python -m build
 ```
 
-Releases: push a tag `vX.Y.Z`; the release workflow publishes to PyPI (trusted publishing).
-
 ## License
 
 [BSD](LICENSE)
