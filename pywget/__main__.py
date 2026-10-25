@@ -3,7 +3,7 @@
 # File: pywget/__main__.py
 # Author: Hadi Cahyadi <cumulus13@gmail.com>
 # Date: 2026-10-25
-# Description: 
+# Description:
 # License: MIT
 
 import sys
