@@ -63,3 +63,14 @@ class StorageError(PywgetError):
 
 class DownloadCancelled(PywgetError):
     exit_code = 130
+
+
+class ServerError(PywgetError):
+    """Error talking to (or reported by) a pywget server/agent."""
+
+    exit_code = 7
+
+    def __init__(self, message: str, status: Optional[int] = None, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.status = status
+        self.retryable = retryable

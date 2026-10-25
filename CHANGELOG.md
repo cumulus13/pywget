@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.3
+
+### Added
+- **Server mode** (`pywget serve`): persistent job queue, HTTP/JSON API, SSE events, web UI,
+  token auth, root-jailed paths, Host allow-list, optional TLS and SSRF guard.
+- **Agent mode** (`pywget agent`): relay that forwards links to an upstream server with a persistent,
+  offline-tolerant outbox and mirrored progress.
+- `pywget send` / `--server` / `--add-only` / `--wait` and `pywget jobs ...` client commands.
+- IDM-style request options: `-r/--referrer`, `-C/--cookie`, `-ua`; `c` (clipboard) and link files as input.
+- `ServerClient` Python client, `ServerError` (exit code 7), shared rate limiter option.
+
+### Changed (breaking vs 2.0.0)
+- Retries short flag is now `-t` (`-r` is the referrer, as in pyidm).
+
 ## 2.0.0
 
 Complete rewrite. Same CLI (`pywget URL -p DIR`) and same library call

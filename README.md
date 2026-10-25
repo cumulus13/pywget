@@ -18,6 +18,8 @@ A drop-in-style `wget` alternative with zero third-party dependencies.
 | Security | http/https only, credentials stripped on cross-origin redirects, path-traversal-proof filenames, TLS verification on by default |
 | Control | Bandwidth limit, custom headers, basic auth, proxy, custom CA, timeouts |
 | Automation | Batch input (`-i`), `--json` output, stable exit codes, SIGINT/SIGTERM-safe |
+| Server mode | `pywget serve`: persistent queue, HTTP/JSON API, SSE events, web UI, token auth |
+| Agent mode | `pywget agent` / `--server`: send links from anywhere; offline-tolerant relay to a server |
 | Library | Typed API, progress callbacks, cancel support, legacy `wget.download()` kept |
 | Portability | Python 3.8+, Windows / Linux / macOS, no dependencies |
 
@@ -46,22 +48,31 @@ pywget -i urls.txt -p downloads --json
 pywget https://api.example.com/export.zip --user me -H "Accept: application/zip"
 ```
 
+```bash
+# download manager mode: run a server, push links to it (see "Server mode and agent")
+pywget serve --root ~/Downloads/pywget &
+pywget send https://example.com/file.iso -r https://example.com/ --wait
+pywget jobs list
+```
+
 Interrupted (Ctrl+C, crash, network loss)? Run the same command again - it resumes.
 
 ## CLI reference
 
 | Option | Description |
 |--------|-------------|
-| `URL ...` | One or more http(s) URLs |
+| `URL ...` | http(s) URLs, `c` = read links from the clipboard, or a text file of links |
 | `-i, --input-file FILE` | Read URLs from file (`-` = stdin); `#` comments allowed |
 | `-p, -P, --path DIR` | Download directory (default `.`) |
 | `-O, --output NAME` | Output file name (single URL) |
 | `-n, --connections N` | Parallel connections per file, 1-32 (default 4) |
-| `-r, --retries N` | Retries per request/segment (default 5) |
+| `-t, --retries N` | Retries per request/segment (default 5) |
+| `-r, --referrer URL` | Referer header (many sites require it) |
+| `-C, --cookie STR` | Cookie string `a=b; c=d` or JSON object |
 | `-T, --timeout SEC` | Network timeout (default 30) |
 | `--limit-rate RATE` | Total speed cap, e.g. `500k`, `2M` |
 | `-H, --header 'K: V'` | Extra header (repeatable) |
-| `-U, --user-agent UA` | Custom User-Agent |
+| `-U, -ua, --user-agent UA` | Custom User-Agent |
 | `--user`, `--password` | Basic auth (password also from `PYWGET_PASSWORD` or prompt) |
 | `--proxy URL` | Proxy (default: environment) |
 | `--no-check-certificate` | Disable TLS verification (not recommended) |
@@ -73,6 +84,10 @@ Interrupted (Ctrl+C, crash, network loss)? Run the same command again - it resum
 | `-q`, `-v` | Quiet / debug logging |
 | `--json` | Machine-readable results on stdout |
 | `-c` | Accepted for wget compatibility (resume is default) |
+| `-s, --server URL` | Send the links to a pywget server/agent instead of downloading locally |
+| `--token TOKEN` | API token for `--server` (default: `$PYWGET_TOKEN` or token file) |
+| `-a, --add-only` | With `--server`: queue paused, do not start (like IDM's *add*) |
+| `--wait` | With `--server`: wait for the jobs to finish |
 
 ### Exit codes
 
@@ -85,6 +100,7 @@ Interrupted (Ctrl+C, crash, network loss)? Run the same command again - it resum
 | 4 | HTTP error status (404, 403, ...) |
 | 5 | Checksum mismatch |
 | 6 | Storage / I/O error (disk full, permissions) |
+| 7 | Server / agent error (unreachable, 401, 409, ...) |
 | 130 | Interrupted (partial data kept for resume) |
 
 ## Python API
@@ -119,6 +135,20 @@ print(result.path, result.size, result.resumed, result.connections)
 # from another thread: dl.cancel()  -> partial state is kept for resume
 ```
 
+Talk to a server / agent, or embed one:
+
+```python
+from pywget import ServerClient, ServerConfig, ServerHandle
+
+client = ServerClient("http://127.0.0.1:8765")      # token: $PYWGET_TOKEN or token file
+job = client.submit({"url": "https://example.com/f.iso", "path": "isos"})[0]
+print(client.wait(job["id"])["status"])
+
+cfg = ServerConfig(port=0, token="secret-token", root="/srv/dl", state_dir="/var/lib/pywget")
+with ServerHandle(cfg) as server:                    # background server (tests, embedding)
+    print(server.url)
+```
+
 Legacy API (unchanged):
 
 ```python
@@ -131,15 +161,156 @@ Errors derive from `pywget.PywgetError` (`InvalidURLError`, `NetworkError`,
 `HTTPStatusError`, `ChecksumError`, `StorageError`, `DownloadCancelled`).
 A `Downloader` runs one download at a time - use one instance per thread.
 
+## Server mode and agent
+
+Run pywget as a long-lived download manager and push links to it from anywhere - the
+same idea as handing a link to IDM, but over a small authenticated HTTP API.
+
+```bash
+# 1. start the server (jobs may only write below --root)
+pywget serve --root ~/Downloads/pywget            # http://127.0.0.1:8765, token auto-created
+
+# 2. send links (token is read from the token file on the same machine)
+pywget send https://example.com/a.iso -p isos -r https://example.com/ --wait
+pywget https://example.com/b.zip --server http://127.0.0.1:8765      # same, legacy form
+pywget send c                      # links found in the clipboard
+pywget send links.txt -a           # a text file of links, queued paused (add only)
+
+# 3. manage
+pywget jobs list
+pywget jobs pause|resume|cancel|retry|remove <id>
+```
+
+Open `http://127.0.0.1:8765/` for the web UI (paste the token once).
+
+### Agent (relay)
+
+An **agent** is a tiny server that does not download: it accepts links on a local port
+and forwards them to an upstream server, keeping them in a persistent outbox when the
+upstream is offline and mirroring progress back. Put it on the machine where links
+appear (laptop, browser helper script) and let a server/NAS do the downloading.
+
+```bash
+# on the download box
+pywget serve --host 0.0.0.0 --root /srv/downloads --tls-cert c.pem --tls-key k.pem
+
+# on your workstation
+pywget agent --upstream https://nas:8765 --upstream-token <TOKEN> --port 8766
+pywget send https://example.com/file.iso --server http://127.0.0.1:8766 --wait
+```
+
+### System overview
+
+```mermaid
+flowchart LR
+    CLI["pywget send / --server"] --> AG
+    BR["Browser helper,<br/>scripts, curl"] --> AG
+    subgraph WS["Workstation"]
+        AG["Agent<br/>pywget agent<br/>persistent outbox"]
+    end
+    AG -- "HTTPS + token<br/>forward job, poll status" --> API
+    CLI -. "direct" .-> API
+    subgraph SV["Download server"]
+        API["HTTP API + web UI<br/>auth, Host check, root jail"] --> MGR["JobManager<br/>queue, N workers"]
+        MGR --> ENG["Downloader engine<br/>segments, resume, retry"]
+        MGR <--> ST[("jobs.json<br/>0600")]
+        ENG --> FS[("download root")]
+    end
+```
+
+### Job flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant A as Agent
+    participant S as Server
+    participant W as Worker
+    U->>A: pywget send URL --wait
+    A->>A: persist job (outbox)
+    loop until accepted
+        A->>S: POST /api/v1/jobs (Bearer token)
+        S-->>A: 201 job id or error / offline then backoff
+    end
+    S->>W: enqueue
+    W->>W: Downloader.fetch (segments, resume)
+    loop every second
+        A->>S: GET /api/v1/jobs/id
+        S-->>A: status, percent, speed, ETA
+    end
+    W-->>S: completed (atomic rename in root)
+    A-->>U: OK path
+```
+
+### Job states
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued: add
+    [*] --> paused: add --add-only
+    queued --> running: worker free
+    running --> paused: pause (partial data kept)
+    paused --> queued: resume
+    running --> completed
+    running --> failed: error after retries
+    running --> cancelled: cancel (partial files removed)
+    queued --> cancelled
+    paused --> cancelled
+    failed --> queued: retry
+    cancelled --> queued: retry
+    running --> queued: server shutdown (auto-resumes on start)
+    completed --> [*]: remove
+    failed --> [*]: remove
+    cancelled --> [*]: remove
+```
+
+### HTTP API
+
+All `/api/v1/*` calls need `Authorization: Bearer <token>` (or `X-Pywget-Token`).
+
+| Method and path | Purpose |
+|-----------------|---------|
+| `GET /health` | Liveness, version, mode (no auth) |
+| `GET /` | Web UI (no auth, token entered in the page) |
+| `POST /api/v1/jobs` | Create job(s): a job object, `{"urls": [...], ...common}` or `{"jobs": [...]}` |
+| `GET /api/v1/jobs[?status=]` | List jobs |
+| `GET /api/v1/jobs/{id}` | One job (secrets are never returned) |
+| `POST /api/v1/jobs/{id}/pause\|resume\|cancel\|retry` | Control a job |
+| `DELETE /api/v1/jobs/{id}` | Remove a finished job record |
+| `GET /api/v1/stats` | Counts, total speed |
+| `GET /api/v1/events` | Server-sent events (`event: job`) |
+
+Job fields: `url`, `filename`, `path` (folder below the root), `referrer`, `cookie`
+(string or object), `headers`, `user_agent`, `username`, `password`, `connections`,
+`checksum`, `limit_rate`, `overwrite`, `add_only`.
+
+```bash
+curl -s -H "Authorization: Bearer $(cat ~/.config/pywget/token)" \
+     -d '{"url":"https://example.com/f.iso","path":"isos","referrer":"https://example.com/"}' \
+     http://127.0.0.1:8765/api/v1/jobs
+```
+
+### Security model
+
+- **Token required** for every API call; generated once (`token` file, mode 0600) or given via `--token` / `$PYWGET_TOKEN`; compared in constant time.
+- **Loopback by default.** Binding elsewhere prints a warning; use `--tls-cert/--tls-key` or an HTTPS reverse proxy.
+- **Root jail:** job `path` can never leave `--root` (absolute paths and `..` are rejected, symlinks resolved).
+- **No CORS** and a `Host` header allow-list (`--allowed-host`) against DNS-rebinding and drive-by browser requests.
+- **`--deny-private-networks`** refuses URLs resolving to private/loopback/link-local addresses (SSRF guard for exposed servers).
+- Request bodies capped at 1 MiB; headers checked for CR/LF injection; credentials and cookies are stored in `jobs.json` (0600) and never returned by the API.
+- Not supported: POST-body downloads (IDM `post data`), FTP.
+
 ## How it works
 
-### Architecture
+### Download engine
 
 ```mermaid
 flowchart LR
     CLI["CLI<br/>pywget.cli"] --> DL
     API["Python API<br/>pywget.download()"] --> DL
     LEG["Legacy shim<br/>pywget.wget"] --> DL
+    JOB["LocalExecutor<br/>(server jobs)"] --> DL
 
     subgraph Engine["pywget.core"]
         DL["Downloader"] --> PROBE["Probe<br/>Range: bytes=0-0"]
@@ -158,7 +329,7 @@ flowchart LR
     VER --> OUT[("final file<br/>atomic rename")]
 ```
 
-[![Architecture 1](https://i.ibb.co/mr6hxjYg/pywget-architecture1.jpg)](https://i.ibb.co/mr6hxjYg/pywget-architecture1.jpg)
+[![Architecture 1](https://i.ibb.co/BVCnttHQ/pywget-architecture1.jpg)](https://i.ibb.co/BVCnttHQ/pywget-architecture1.jpg)
 
 ### Download sequence
 
@@ -233,7 +404,7 @@ flowchart TD
 
 [![Architecture 4](https://i.ibb.co/nqGmzdpw/pywget-architecture4.jpg)](https://i.ibb.co/nqGmzdpw/pywget-architecture4.jpg)
 
-### Main types
+### Main types - engine
 
 ```mermaid
 classDiagram
@@ -241,11 +412,13 @@ classDiagram
         +fetch(url) DownloadResult
         +download(url) Path
         +cancel()
+        +partial
     }
     class Options {
         connections
         retries
         limit_rate
+        rate_limiter
         checksum
         progress
     }
@@ -266,7 +439,67 @@ classDiagram
     ProgressBar ..> Tracker : renders snapshots
 ```
 
-[![Architecture 5](https://i.ibb.co/9HYQ3WrT/pywget-architecture5.jpg)](https://i.ibb.co/9HYQ3WrT/pywget-architecture5.jpg)
+[![Architecture 5](https://i.ibb.co/d0kCy05W/pywget-architecture5.jpg)](https://i.ibb.co/d0kCy05W/pywget-architecture5.jpg)
+
+### Main types - server and agent
+
+```mermaid
+classDiagram
+    class ServerHandle {
+        +start()
+        +close()
+        +url
+    }
+    class PywgetHTTPServer
+    class ApiHandler {
+        auth, Host check
+        routes /api/v1/*
+    }
+    class JobManager {
+        +add(spec) Job
+        +pause(id)
+        +resume(id)
+        +cancel(id)
+        +retry(id)
+        +remove(id)
+    }
+    class Job
+    class JobStore
+    class EventBus
+    class LocalExecutor
+    class RelayExecutor
+    class ServerClient
+    class ServerConfig
+    ServerHandle --> PywgetHTTPServer
+    ServerHandle --> JobManager
+    PywgetHTTPServer --> ApiHandler
+    ApiHandler --> JobManager
+    JobManager o-- Job
+    JobManager --> JobStore : persists
+    JobManager --> EventBus : SSE
+    JobManager --> LocalExecutor : server mode
+    JobManager --> RelayExecutor : agent mode
+    LocalExecutor --> Downloader
+    RelayExecutor --> ServerClient : forwards to upstream
+    ServerHandle o-- ServerConfig
+```
+
+[![Architecture 5](https://i.ibb.co/zVMXCFtz/pywget-architecture6.jpg)](https://i.ibb.co/zVMXCFtz/pywget-architecture6.jpg)
+
+### Module map
+
+| Module | Role |
+|--------|------|
+| `pywget.core` | Download engine (`Downloader`, `Options`) |
+| `pywget.progress`, `pywget.utils`, `pywget.errors` | Progress bar, helpers, exceptions and exit codes |
+| `pywget.cli` | CLI: direct download, `serve`, `agent`, `send`, `jobs` |
+| `pywget.server` | HTTP API, SSE, web UI hosting (`ServerHandle`, `run_server`) |
+| `pywget.jobs` | `Job`, `JobManager`, persistence, `LocalExecutor` / `RelayExecutor` |
+| `pywget.client` | `ServerClient` (used by `send`, `jobs` and the agent) |
+| `pywget.config` | Token file, config dir, `ServerConfig` |
+| `pywget.clipboard` | `c` input: clipboard and URL extraction |
+| `pywget.webui` | Embedded single-page web UI |
+| `pywget.wget` | Backward-compatible `wget.download()` |
 
 ## Behaviour details
 
@@ -275,7 +508,8 @@ classDiagram
 - **Existing file:** same size means skipped; different size is saved as `name.1` (wget style) unless `--overwrite`.
 - **Partial files:** stored as `name.part` + `name.pywget`; removed on success. Changed remote file (size/ETag/mtime) restarts cleanly.
 - **Redirects:** only http/https; `Authorization`/`Cookie` are dropped when the origin changes.
-- **Not supported (by design):** FTP, recursive mirroring.
+- **Server jobs:** persisted in `jobs.json`; a job running at shutdown is re-queued and resumes from its `.part` data.
+- **Not supported (by design):** FTP, recursive mirroring, POST-body downloads.
 
 ## Development
 

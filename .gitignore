@@ -2,3 +2,10 @@
 # Ignore Sublime Text project files
 *.sublime-project
 *.sublime-workspace
+
+# Added entries (5 items)
+dist/
+__pycache__/
+*.egg-info/
+*.ini
+*.sha256

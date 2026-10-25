@@ -6,9 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pywget"
-dynamic = [
-    "version",
-]
+version = "2.0.3"
 description = "Robust, resumable, multi-connection wget alternative - CLI and Python library, zero dependencies"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -46,7 +44,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = []
-version = "2.0.2"
 
 [project.license]
 file = "LICENSE"
@@ -81,9 +78,6 @@ pywget = [
     "py.typed",
 ]
 
-[tool.setuptools.dynamic.version]
-attr = "pywget.__version__.__version__"
-
 [tool.pytest.ini_options]
 testpaths = [
     "tests",
@@ -113,6 +107,5 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.8"
 ignore_missing_imports = true
 warn_unused_ignores = true

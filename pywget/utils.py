@@ -178,3 +178,22 @@ class RateLimiter:
                 cancel.wait(delay)
             else:
                 time.sleep(delay)
+
+
+def build_headers(
+    referrer: Optional[str] = None,
+    cookie: Optional[Union[str, dict]] = None,
+    headers: Optional[dict] = None,
+) -> dict:
+    """Merge referrer/cookie/extra headers; reject header injection (CR/LF)."""
+    merged = {str(k): str(v) for k, v in (headers or {}).items()}
+    if referrer:
+        merged["Referer"] = str(referrer)
+    if cookie:
+        if isinstance(cookie, dict):
+            cookie = "; ".join(f"{k}={v}" for k, v in cookie.items())
+        merged["Cookie"] = str(cookie).strip()
+    for name, value in merged.items():
+        if not name or any(c in name + value for c in "\r\n\x00") or ":" in name:
+            raise ValueError(f"invalid header: {name!r}")
+    return merged

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Union
 
 from .__version__ import __version__
+from .client import ServerClient
+from .config import ServerConfig
 from .core import Downloader, DownloadResult, Options
 from .errors import (
     ChecksumError,
@@ -22,9 +24,11 @@ from .errors import (
     InvalidURLError,
     NetworkError,
     PywgetError,
+    ServerError,
     StorageError,
 )
 from .progress import ProgressBar, ProgressInfo
+from .server import ServerHandle, run_server
 
 __all__ = [
     "__version__",
@@ -34,6 +38,11 @@ __all__ = [
     "Options",
     "ProgressBar",
     "ProgressInfo",
+    "ServerClient",
+    "ServerConfig",
+    "ServerHandle",
+    "ServerError",
+    "run_server",
     "PywgetError",
     "InvalidURLError",
     "NetworkError",

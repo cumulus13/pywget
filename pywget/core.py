@@ -103,6 +103,7 @@ class Options:
     checksum: Optional[str] = None  # "sha256:<hex>" or bare hex digest
     chunk_size: int = 64 * 1024
     progress: Optional[Callable[[ProgressInfo], None]] = None
+    rate_limiter: Optional[RateLimiter] = None  # shared limiter (overrides limit_rate)
 
     def __post_init__(self) -> None:
         if not 1 <= int(self.connections) <= 32:
@@ -161,7 +162,7 @@ class DownloadResult:
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Follow only http(s) redirects; never leak credentials across origins."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         target = urlsplit(newurl)
         if target.scheme.lower() not in ("http", "https"):
             raise urllib.error.HTTPError(
@@ -250,6 +251,7 @@ class Downloader:
         self._auth: Optional[Tuple[str, str]] = None
         self._last_report = 0.0
         self._tracker: Optional[Tracker] = None
+        self.partial: Optional[Tuple[Path, Path]] = None  # (.part, .pywget) of the current download
         self._opener = self._build_opener()
 
     # ------------------------------------------------------------------ public
@@ -301,9 +303,10 @@ class Downloader:
         elif o.overwrite:
             _unlink(part, state)
 
+        self.partial = (part, state)
         tracker = Tracker(clean_url, dest.name, info.size)
         self._tracker = tracker
-        limiter = RateLimiter(o.limit_rate)
+        limiter = o.rate_limiter or RateLimiter(o.limit_rate)
         resumed = False
         used = 1
 
