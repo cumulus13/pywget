@@ -218,6 +218,9 @@ flowchart LR
     end
 ```
 
+[![Architecture 7](https://i.ibb.co/96D8hz7/pywget-architecture7.jpg)](https://i.ibb.co/96D8hz7/pywget-architecture7.jpg)
+
+
 ### Job flow
 
 ```mermaid
@@ -243,6 +246,8 @@ sequenceDiagram
     A-->>U: OK path
 ```
 
+[![Architecture 8](https://i.ibb.co/4n0GBmSD/pywget-architecture8.jpg)](https://i.ibb.co/4n0GBmSD/pywget-architecture8.jpg)
+
 ### Job states
 
 ```mermaid
@@ -264,6 +269,8 @@ stateDiagram-v2
     failed --> [*]: remove
     cancelled --> [*]: remove
 ```
+
+[![Architecture 9](https://i.ibb.co/wNkVB4fp/pywget-architecture9.jpg)](https://i.ibb.co/wNkVB4fp/pywget-architecture9.jpg)
 
 ### HTTP API
 
