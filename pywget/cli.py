@@ -239,7 +239,7 @@ def _config_main(argv: List[str]) -> int:
         from rchf import CustomRichHelpFormatter
     except:
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
-    
+
     p = argparse.ArgumentParser(prog="pywget config", description="Manage the optional config file.", formatter_class=CustomRichHelpFormatter)
     p.add_argument("action", choices=["path", "init", "show"])
     p.add_argument("--force", action="store_true", help="init: overwrite an existing file")
@@ -266,7 +266,7 @@ def _token_main(argv: List[str]) -> int:
         from rchf import CustomRichHelpFormatter
     except:
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
-    
+
     p = argparse.ArgumentParser(
         prog="pywget token",
         description="Manage the API token (stored in the token file, mode 0600).",
@@ -513,7 +513,7 @@ def _send_main(argv: List[str]) -> int:
         from rchf import CustomRichHelpFormatter
     except:
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
-    
+
     p = argparse.ArgumentParser(prog="pywget send", description="Send links to a pywget server or agent.", formatter_class=CustomRichHelpFormatter)
     p.add_argument("urls", nargs="*", metavar="URL", help="http(s) URLs, 'c' for the clipboard, or a file of links")
     p.add_argument("-i", "--input-file", metavar="FILE", help="read URLs from FILE ('-' = stdin)")
@@ -549,7 +549,7 @@ def _jobs_main(argv: List[str]) -> int:
         from rchf import CustomRichHelpFormatter
     except:
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
-    
+
     p = argparse.ArgumentParser(prog="pywget jobs", description="Inspect and control server jobs.", formatter_class=CustomRichHelpFormatter)
     p.add_argument("action", choices=["list", "show", "pause", "resume", "cancel", "retry", "remove", "stats"])
     p.add_argument("job_id", nargs="?", help="job id (not needed for list/stats)")
@@ -593,7 +593,7 @@ def _serve_main(argv: List[str], agent: bool) -> int:
         from rchf import CustomRichHelpFormatter
     except:
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
-    
+
     p = argparse.ArgumentParser(
         prog=f"pywget {name}",
         description=(
