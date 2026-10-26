@@ -9,3 +9,6 @@ __pycache__/
 *.egg-info/
 *.ini
 *.sha256
+
+# Added entries (1 items)
+images/
