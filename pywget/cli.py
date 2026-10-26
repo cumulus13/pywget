@@ -237,7 +237,7 @@ def _apply_config(parser: argparse.ArgumentParser, section: str, spec: Spec) -> 
 def _config_main(argv: List[str]) -> int:
     try:
         from rchf import CustomRichHelpFormatter
-    except:
+    except: # noqa
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(prog="pywget config", description="Manage the optional config file.", formatter_class=CustomRichHelpFormatter)
@@ -264,7 +264,7 @@ def _config_main(argv: List[str]) -> int:
 def _token_main(argv: List[str]) -> int:
     try:
         from rchf import CustomRichHelpFormatter
-    except:
+    except: # noqa
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(
@@ -307,7 +307,7 @@ def _token_main(argv: List[str]) -> int:
 def build_parser() -> argparse.ArgumentParser:
     try:
         from rchf import CustomRichHelpFormatter
-    except:
+    except: # noqa
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(
@@ -511,7 +511,7 @@ def _forward(args: argparse.Namespace, urls: List[str], parser: argparse.Argumen
 def _send_main(argv: List[str]) -> int:
     try:
         from rchf import CustomRichHelpFormatter
-    except:
+    except: # noqa
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(prog="pywget send", description="Send links to a pywget server or agent.", formatter_class=CustomRichHelpFormatter)
@@ -547,7 +547,7 @@ def _send_main(argv: List[str]) -> int:
 def _jobs_main(argv: List[str]) -> int:
     try:
         from rchf import CustomRichHelpFormatter
-    except:
+    except: # noqa
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(prog="pywget jobs", description="Inspect and control server jobs.", formatter_class=CustomRichHelpFormatter)
@@ -591,7 +591,7 @@ def _serve_main(argv: List[str], agent: bool) -> int:
     name = "agent" if agent else "serve"
     try:
         from rchf import CustomRichHelpFormatter
-    except:
+    except: # noqa
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(
