@@ -235,7 +235,12 @@ def _apply_config(parser: argparse.ArgumentParser, section: str, spec: Spec) -> 
 
 
 def _config_main(argv: List[str]) -> int:
-    p = argparse.ArgumentParser(prog="pywget config", description="Manage the optional config file.")
+    try:
+        from rchf import CustomRichHelpFormatter
+    except:
+        CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
+    
+    p = argparse.ArgumentParser(prog="pywget config", description="Manage the optional config file.", formatter_class=CustomRichHelpFormatter)
     p.add_argument("action", choices=["path", "init", "show"])
     p.add_argument("--force", action="store_true", help="init: overwrite an existing file")
     args = p.parse_args(argv)
@@ -257,9 +262,15 @@ def _config_main(argv: List[str]) -> int:
 
 
 def _token_main(argv: List[str]) -> int:
+    try:
+        from rchf import CustomRichHelpFormatter
+    except:
+        CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
+    
     p = argparse.ArgumentParser(
         prog="pywget token",
         description="Manage the API token (stored in the token file, mode 0600).",
+        formatter_class=CustomRichHelpFormatter
     )
     p.add_argument("action", choices=["show", "new", "set", "path"])
     p.add_argument("value", nargs="?", help="set: the token to use ('-' = read from stdin)")
@@ -294,11 +305,16 @@ def _token_main(argv: List[str]) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    try:
+        from rchf import CustomRichHelpFormatter
+    except:
+        CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
+
     p = argparse.ArgumentParser(
         prog="pywget",
         description="Robust, resumable, multi-connection wget alternative with server and agent modes.",
         epilog=EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=CustomRichHelpFormatter,
     )
     p.add_argument("urls", nargs="*", metavar="URL", help="http(s) URLs, 'c' for the clipboard, or a file of links")
     p.add_argument("-i", "--input-file", metavar="FILE", help="read URLs from FILE ('-' = stdin)")
@@ -493,7 +509,12 @@ def _forward(args: argparse.Namespace, urls: List[str], parser: argparse.Argumen
 
 
 def _send_main(argv: List[str]) -> int:
-    p = argparse.ArgumentParser(prog="pywget send", description="Send links to a pywget server or agent.")
+    try:
+        from rchf import CustomRichHelpFormatter
+    except:
+        CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
+    
+    p = argparse.ArgumentParser(prog="pywget send", description="Send links to a pywget server or agent.", formatter_class=CustomRichHelpFormatter)
     p.add_argument("urls", nargs="*", metavar="URL", help="http(s) URLs, 'c' for the clipboard, or a file of links")
     p.add_argument("-i", "--input-file", metavar="FILE", help="read URLs from FILE ('-' = stdin)")
     p.add_argument("-p", "--path", default=".", metavar="DIR", help="folder below the server root")
@@ -524,7 +545,12 @@ def _send_main(argv: List[str]) -> int:
 
 
 def _jobs_main(argv: List[str]) -> int:
-    p = argparse.ArgumentParser(prog="pywget jobs", description="Inspect and control server jobs.")
+    try:
+        from rchf import CustomRichHelpFormatter
+    except:
+        CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
+    
+    p = argparse.ArgumentParser(prog="pywget jobs", description="Inspect and control server jobs.", formatter_class=CustomRichHelpFormatter)
     p.add_argument("action", choices=["list", "show", "pause", "resume", "cancel", "retry", "remove", "stats"])
     p.add_argument("job_id", nargs="?", help="job id (not needed for list/stats)")
     p.add_argument("--status", help="filter for 'list' (queued, running, paused, completed, failed, cancelled)")
@@ -563,6 +589,11 @@ def _jobs_main(argv: List[str]) -> int:
 
 def _serve_main(argv: List[str], agent: bool) -> int:
     name = "agent" if agent else "serve"
+    try:
+        from rchf import CustomRichHelpFormatter
+    except:
+        CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
+    
     p = argparse.ArgumentParser(
         prog=f"pywget {name}",
         description=(
@@ -570,6 +601,7 @@ def _serve_main(argv: List[str], agent: bool) -> int:
             if agent else
             "Run the pywget download server: HTTP API, persistent queue, web UI."
         ),
+        formatter_class=CustomRichHelpFormatter
     )
     p.add_argument("--host", default=DEFAULT_HOST, help=f"bind address (default: {DEFAULT_HOST})")
     p.add_argument("--port", type=int, default=DEFAULT_AGENT_PORT if agent else DEFAULT_PORT, help="TCP port")
