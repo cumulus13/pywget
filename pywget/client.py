@@ -9,13 +9,30 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Dict, List, Optional, Union
+from contextlib import closing
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
 from urllib.parse import quote, urlencode, urlsplit
 
 from .config import DEFAULT_HOST, DEFAULT_PORT, LOOPBACK_HOSTS, load_token
 from .errors import ServerError
 
 TERMINAL = ("completed", "failed", "cancelled")
+ACTIVE = ("queued", "running")
+
+
+def _map_http_error(exc: urllib.error.HTTPError) -> ServerError:
+    detail = ""
+    try:
+        detail = json.loads(exc.read().decode("utf-8")).get("error", "")
+    except (ValueError, OSError, AttributeError):
+        pass
+    exc.close()
+    hint = " (missing/invalid token: use --token, $PYWGET_TOKEN or the token file)" if exc.code == 401 else ""
+    return ServerError(
+        f"server answered HTTP {exc.code}: {detail or exc.reason}{hint}",
+        status=exc.code,
+        retryable=exc.code in (502, 503, 504),
+    )
 
 
 class ServerClient:
@@ -60,18 +77,7 @@ class ServerClient:
             with self._opener.open(request, timeout=self.timeout) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = json.loads(exc.read().decode("utf-8")).get("error", "")
-            except (ValueError, OSError, AttributeError):
-                pass
-            exc.close()
-            hint = " (missing/invalid token: use --token, $PYWGET_TOKEN or the token file)" if exc.code == 401 else ""
-            raise ServerError(
-                f"server answered HTTP {exc.code}: {detail or exc.reason}{hint}",
-                status=exc.code,
-                retryable=exc.code in (502, 503, 504),
-            ) from None
+            raise _map_http_error(exc) from None
         except urllib.error.URLError as exc:
             raise ServerError(f"cannot reach {self.base}: {exc.reason}", retryable=True) from None
         except (OSError, http.client.HTTPException) as exc:
@@ -125,3 +131,70 @@ class ServerClient:
             if deadline and time.monotonic() > deadline:
                 raise ServerError(f"timed out waiting for job {job_id}")
             time.sleep(interval)
+
+    def wait_all(
+        self,
+        job_ids: Sequence[str],
+        interval: float = 1.0,
+        timeout: Optional[float] = None,
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Poll until every job in *job_ids* is finished; return their final states."""
+        final: Dict[str, Dict[str, Any]] = {}
+        for job in self.watch(job_ids, interval=interval, timeout=timeout):
+            if callback:
+                callback(job)
+            final[job["id"]] = job
+        return [final[job_id] for job_id in job_ids]
+
+    def watch(
+        self,
+        job_ids: Optional[Sequence[str]] = None,
+        interval: float = 1.0,
+        timeout: Optional[float] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        """Poll and yield a job each time its status, progress or error changes.
+
+        With *job_ids* the iterator ends when all of them are finished (completed / failed /
+        cancelled). Without ids it watches every job and ends when nothing is queued or running.
+        """
+        interval = max(0.2, float(interval))
+        deadline = time.monotonic() + timeout if timeout else None
+        seen: Dict[str, tuple] = {}
+        while True:
+            jobs = [self.get(job_id) for job_id in job_ids] if job_ids else self.list()
+            for job in jobs:
+                key = (job["status"], job.get("percent"), job.get("error"), job.get("remote_status"))
+                if seen.get(job["id"]) != key:
+                    seen[job["id"]] = key
+                    yield job
+            if job_ids:
+                finished = all(job["status"] in TERMINAL for job in jobs)
+            else:
+                finished = not any(job["status"] in ACTIVE for job in jobs)
+            if finished:
+                return
+            if deadline and time.monotonic() > deadline:
+                raise ServerError("timed out while watching jobs")
+            time.sleep(interval)
+
+    def events(self, timeout: float = 30.0) -> Iterator[Dict[str, Any]]:
+        """Server-sent events: yields ``{"event": "job", "job": {...}}`` as the server pushes them."""
+        headers = {"Accept": "text/event-stream"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.base + "/api/v1/events", headers=headers)
+        try:
+            response = self._opener.open(request, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            raise _map_http_error(exc) from None
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+            raise ServerError(f"cannot reach {self.base}: {exc}", retryable=True) from None
+        with closing(response):
+            for raw in response:
+                line = raw.decode("utf-8", "replace").rstrip("\r\n")
+                if line.startswith("data:"):
+                    try:
+                        yield json.loads(line[5:].strip())
+                    except ValueError:
+                        continue

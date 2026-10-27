@@ -271,3 +271,53 @@ def test_stop_reason_cleanup_helpers():
     assert build_headers("http://r/", {"a": "b", "c": "d"}, {"X": "1"}) == {"X": "1", "Referer": "http://r/", "Cookie": "a=b; c=d"}
     with pytest.raises(ValueError):
         build_headers(headers={"X": "a\r\nInjected: 1"})
+
+
+def test_watch_and_wait_all(srv, server):
+    c = client_for(srv)
+    ids = [j["id"] for j in c.submit([{"url": server + "/small.txt"}, {"url": server + "/nope"}])]
+    last = {}
+    for job in c.watch(ids, interval=0.2, timeout=20):
+        last[job["id"]] = job["status"]
+    assert sorted(last.values()) == ["completed", "failed"]
+    seen = []
+    finals = c.wait_all(ids, interval=0.2, timeout=20, callback=seen.append)
+    assert [j["id"] for j in finals] == ids and seen  # same order as requested
+
+
+def test_watch_all_ends_when_idle_and_times_out(srv, server):
+    c = client_for(srv)
+    job = c.submit({"url": server + "/small.txt", "add_only": True})[0]
+    assert [j["id"] for j in c.watch(interval=0.2, timeout=5)] == [job["id"]]  # paused is not active
+    with pytest.raises(ServerError):
+        list(c.watch([job["id"]], interval=0.2, timeout=0.5))  # never reaches a terminal state
+
+
+def test_events_client(srv, server):
+    import threading
+
+    c = client_for(srv)
+    threading.Timer(0.3, lambda: c.submit({"url": server + "/small.txt"})).start()
+    deadline = time.time() + 15
+    statuses = []
+    for event in c.events(timeout=10):
+        if event.get("event") == "job":
+            statuses.append(event["job"]["status"])
+            if event["job"]["status"] == "completed":
+                break
+        assert time.time() < deadline
+    assert "completed" in statuses
+
+
+def test_cli_jobs_watch(srv, server, capsys, monkeypatch):
+    monkeypatch.setenv("PYWGET_TOKEN", TOKEN)
+    c = client_for(srv)
+    ok = c.submit({"url": server + "/small.txt"})[0]["id"]
+    bad = c.submit({"url": server + "/nope"})[0]["id"]
+    base = ["--server", srv.url, "--interval", "0.2", "--timeout", "20"]
+    assert main(["jobs", "watch", ok, "--json", *base]) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert lines[-1]["status"] == "completed" and all(line["id"] == ok for line in lines)
+    assert main(["jobs", "watch", bad, *base]) == 1
+    assert "failed" in capsys.readouterr().out
+    assert main(["jobs", "watch", *base]) in (0, 1)  # no ids: all jobs, ends when idle

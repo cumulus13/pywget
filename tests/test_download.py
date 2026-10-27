@@ -148,3 +148,25 @@ def test_cli_input_file(server, tmp_path):
     listing.write_text(f"# comment\n{server}/small.txt\n\n{server}/cd\n")
     assert main(["-i", str(listing), "-p", str(tmp_path / "out"), "-q"]) == 0
     assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["report final.txt", "small.txt"]
+
+
+def test_concurrent_same_destination_gets_distinct_names(server, tmp_path):
+    import threading
+
+    results, errors = [], []
+
+    def run():
+        try:
+            results.append(make(tmp_path, connections=2, limit_rate="3M").fetch(server + "/big.bin"))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(60)
+    assert not errors, errors
+    assert sorted(r.path.name for r in results) == ["big.bin", "big.bin.1"]
+    assert all(r.path.read_bytes() == DATA for r in results)
+    assert not list(tmp_path.glob("*.part")) and not list(tmp_path.glob("*.pywget"))

@@ -267,6 +267,28 @@ def _unlink(*paths: Path) -> None:
             pass
 
 
+_CLAIMS: set = set()
+_CLAIMS_LOCK = threading.Lock()
+
+
+def _claim_dest(dest: Path, claims: List[str]) -> Path:
+    """Reserve a destination name process-wide; concurrent downloads of one name get ``name.1`` ..."""
+    with _CLAIMS_LOCK:
+        candidate, index = dest, 0
+        while str(candidate) in _CLAIMS:
+            index += 1
+            candidate = dest.with_name(f"{dest.name}.{index}")
+        _CLAIMS.add(str(candidate))
+        claims.append(str(candidate))
+        return candidate
+
+
+def _release_claims(claims: List[str]) -> None:
+    with _CLAIMS_LOCK:
+        for name in claims:
+            _CLAIMS.discard(name)
+
+
 class Downloader:
     """Resumable, multi-connection HTTP(S) downloader.
 
@@ -317,7 +339,22 @@ class Downloader:
         )
         dest_dir = Path(output_dir if output_dir is not None else o.output_dir).expanduser()
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / name
+        claims: List[str] = []
+        try:
+            return self._fetch_to(clean_url, info, _claim_dest(dest_dir / name, claims), dest_dir, started, claims)
+        finally:
+            _release_claims(claims)
+
+    def _fetch_to(
+        self,
+        clean_url: str,
+        info: RemoteInfo,
+        dest: Path,
+        dest_dir: Path,
+        started: float,
+        claims: List[str],
+    ) -> DownloadResult:
+        o = self.options
         part = dest.with_name(dest.name + ".part")
         state = dest.with_name(dest.name + ".pywget")
 
@@ -329,7 +366,7 @@ class Downloader:
                     clean_url, dest, info.size, time.monotonic() - started,
                     skipped=True, checksum=digest,
                 )
-            dest = unique_path(dest)
+            dest = _claim_dest(unique_path(dest), claims)
             part = dest.with_name(dest.name + ".part")
             state = dest.with_name(dest.name + ".pywget")
         elif o.overwrite:

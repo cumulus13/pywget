@@ -12,3 +12,8 @@ __pycache__/
 
 # Added entries (1 items)
 images/
+
+# Added entries (3 items)
+*.patch
+*.hdr
+*.msg

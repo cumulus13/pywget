@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.12
+
+### Added
+- Status polling helpers: `ServerClient.watch()`, `wait_all()` and `events()` (SSE), CLI `pywget jobs watch`
+  (`--interval`, `--timeout`, `--json`; exit code 1 when a job failed or was cancelled).
+- README: "Polling job status" with Python / standard-library / SSE examples and mermaid diagrams.
+
+### Fixed
+- Two concurrent downloads with the same destination name no longer clobber each other's `.part` file;
+  the second one is saved as `name.1` (destination names are claimed process-wide).
+
 ## 2.0.6
 
 ### Added

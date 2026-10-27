@@ -56,7 +56,7 @@ other commands (pywget COMMAND -h):
   serve   run the download server (HTTP API + queue + web UI)
   agent   run a relay that forwards links to an upstream server
   send    send links to a server/agent ("c" = clipboard, or a text file of links)
-  jobs    list / show / pause / resume / cancel / retry / remove server jobs
+  jobs    list / show / pause / resume / cancel / retry / remove / watch server jobs
   token   show / new / set / path   - the API token (auto-generated on first serve)
   config  path / init / show        - the optional config file (config.ini)
 
@@ -544,6 +544,23 @@ def _send_main(argv: List[str]) -> int:
 # --------------------------------------------------------------------- jobs
 
 
+def _watch_jobs(args: argparse.Namespace) -> int:
+    """Poll the server and print a line whenever a job changes; exit 0 only if all completed."""
+    bad = False
+    try:
+        client = _client(args)
+        for job in client.watch(args.job_ids or None, interval=args.interval, timeout=args.timeout):
+            print(json.dumps(job) if args.json else _fmt_job(job), flush=True)
+            bad = bad or job["status"] in ("failed", "cancelled")
+    except KeyboardInterrupt:
+        print("pywget: stopped watching (jobs keep running on the server)", file=sys.stderr)
+        return 130
+    except PywgetError as exc:
+        print(f"pywget: error: {exc}", file=sys.stderr)
+        return getattr(exc, "exit_code", 7)
+    return 1 if bad else 0
+
+
 def _jobs_main(argv: List[str]) -> int:
     try:
         from rchf import CustomRichHelpFormatter
@@ -551,15 +568,21 @@ def _jobs_main(argv: List[str]) -> int:
         CustomRichHelpFormatter = argparse.RawDescriptionHelpFormatter
 
     p = argparse.ArgumentParser(prog="pywget jobs", description="Inspect and control server jobs.", formatter_class=CustomRichHelpFormatter)
-    p.add_argument("action", choices=["list", "show", "pause", "resume", "cancel", "retry", "remove", "stats"])
-    p.add_argument("job_id", nargs="?", help="job id (not needed for list/stats)")
+    p.add_argument("action", choices=["list", "show", "pause", "resume", "cancel", "retry", "remove", "stats", "watch"])
+    p.add_argument("job_ids", nargs="*", metavar="job_id",
+                   help="job id (not needed for list/stats; 'watch' takes any number, none = all jobs)")
     p.add_argument("--status", help="filter for 'list' (queued, running, paused, completed, failed, cancelled)")
-    p.add_argument("--json", action="store_true")
+    p.add_argument("--interval", type=float, default=1.0, metavar="SEC", help="watch: poll interval (default 1)")
+    p.add_argument("--timeout", type=float, default=None, metavar="SEC", help="watch: give up after SEC seconds")
+    p.add_argument("--json", action="store_true", help="watch: one JSON object per line (NDJSON)")
     _add_server_args(p)
     _apply_config(p, "client", CLIENT_SPEC)
     args = p.parse_args(argv)
-    if args.action not in ("list", "stats") and not args.job_id:
-        p.error(f"'{args.action}' needs a job id")
+    if args.action == "watch":
+        return _watch_jobs(args)
+    if args.action not in ("list", "stats") and len(args.job_ids) != 1:
+        p.error(f"'{args.action}' needs exactly one job id")
+    args.job_id = args.job_ids[0] if args.job_ids else None
     try:
         client = _client(args)
         if args.action == "list":

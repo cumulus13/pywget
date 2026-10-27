@@ -53,6 +53,7 @@ pywget https://api.example.com/export.zip --user me -H "Accept: application/zip"
 pywget serve --root ~/Downloads/pywget &
 pywget send https://example.com/file.iso -r https://example.com/ --wait
 pywget jobs list
+pywget jobs watch                     # live status (polling)
 ```
 
 Interrupted (Ctrl+C, crash, network loss)? Run the same command again - it resumes.
@@ -350,6 +351,119 @@ curl -s -H "Authorization: Bearer $(cat ~/.config/pywget/token)" \
      http://127.0.0.1:8765/api/v1/jobs
 ```
 
+### Polling job status
+
+A job moves `queued -> running -> completed | failed | cancelled` (or `paused`). There are four ways to follow it:
+
+| Method | Use it when |
+|--------|-------------|
+| `pywget send ... --wait` | one-off: send and block until done |
+| `pywget jobs watch [ID ...]` | live view in a terminal (`--json` = one JSON object per line, exit code 1 if any job failed) |
+| `ServerClient.wait / wait_all / watch` | Python code that polls for you |
+| `GET /api/v1/jobs/{id}` in a loop | any language / `curl` |
+| `ServerClient.events()` or `GET /api/v1/events` | push (server-sent events) instead of polling |
+
+```bash
+pywget jobs watch                      # all jobs, ends when nothing is queued or running
+pywget jobs watch 78e2a219f26f --interval 0.5 --timeout 3600
+```
+
+Python (library):
+
+```python
+from pywget import ServerClient
+
+client = ServerClient("http://127.0.0.1:8765")      # token: $PYWGET_TOKEN or the token file
+job = client.submit({"url": "https://example.com/big.iso", "path": "isos"})[0]
+
+# 1) live progress - yields whenever status / percent / error changes
+for j in client.watch([job["id"]], interval=0.5):
+    print(f'{j["status"]:<9} {j["percent"] or 0:5.1f}%  {j["speed"] / 1e6:4.1f} MB/s  ETA {j["eta"]}')
+
+# 2) block until one job is finished (raises ServerError on timeout)
+final = client.wait(job["id"], interval=1.0, timeout=3600)
+print(final["status"], final["result_path"])
+
+# 3) many jobs at once
+jobs = client.submit({"urls": ["https://example.com/a.iso", "https://example.com/b.iso"], "path": "isos"})
+finals = client.wait_all([j["id"] for j in jobs], interval=1.0)
+print("failed:", [j["name"] for j in finals if j["status"] != "completed"])
+```
+
+Plain polling with only the standard library (the same loop works in any language):
+
+```python
+import json, time, urllib.request
+
+BASE, TOKEN = "http://127.0.0.1:8765", open("/path/to/token").read().strip()
+
+def call(method, path, body=None):
+    request = urllib.request.Request(
+        BASE + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.load(response)
+
+job = call("POST", "/api/v1/jobs", {"url": "https://example.com/big.iso"})["jobs"][0]
+deadline = time.monotonic() + 600
+while True:
+    job = call("GET", f"/api/v1/jobs/{job['id']}")
+    print(job["status"], job["percent"])
+    if job["status"] in ("completed", "failed", "cancelled"):
+        break
+    if time.monotonic() > deadline:
+        raise TimeoutError("job still running")
+    time.sleep(1)
+```
+
+Push instead of poll (server-sent events):
+
+```python
+for event in client.events():                       # {"event": "job", "job": {...}}
+    job = event["event"] == "job" and event["job"]
+    if job and job["status"] in ("completed", "failed", "cancelled"):
+        print(job["name"], job["status"])
+        break
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client (watch / wait / curl)
+    participant S as Server API
+    participant W as Worker
+    C->>S: POST /api/v1/jobs
+    S-->>C: 201 job id, status queued
+    S->>W: enqueue
+    loop every interval seconds
+        C->>S: GET /api/v1/jobs/id
+        S-->>C: status, percent, speed, ETA, error
+        Note over C: watch() yields only when something changed
+    end
+    W-->>S: completed (or failed / cancelled)
+    C->>S: GET /api/v1/jobs/id
+    S-->>C: terminal status and result_path
+    Note over C: loop ends
+```
+
+[![Architecture 10](https://i.ibb.co/S73h5H3Q/pywget-architecture10.jpg)](https://i.ibb.co/S73h5H3Q/pywget-architecture10.jpg)
+
+```mermaid
+flowchart TD
+    A["GET /api/v1/jobs/id"] --> B{"status finished?<br/>completed, failed, cancelled"}
+    B -- yes --> C["use result_path / error<br/>exit code 0 or 1"]
+    B -- no --> D{"timeout reached?"}
+    D -- yes --> E["ServerError: timed out<br/>job keeps running on the server"]
+    D -- no --> F["sleep interval"]
+    F --> A
+    B -- "paused" --> G["waits for resume<br/>(watch of explicit ids keeps polling)"]
+    G --> D
+```
+
+[![Architecture 11](https://i.ibb.co/Ld9cD29F/pywget-architecture11.jpg)](https://i.ibb.co/Ld9cD29F/pywget-architecture11.jpg)
+
 ### Security model
 
 - **Token required** for every API call; generated once (`token` file, mode 0600) or given via `--token` / `$PYWGET_TOKEN`; compared in constant time.
@@ -554,7 +668,7 @@ classDiagram
 | `pywget.cli` | CLI: direct download, `serve`, `agent`, `send`, `jobs` |
 | `pywget.server` | HTTP API, SSE, web UI hosting (`ServerHandle`, `run_server`) |
 | `pywget.jobs` | `Job`, `JobManager`, persistence, `LocalExecutor` / `RelayExecutor` |
-| `pywget.client` | `ServerClient` (used by `send`, `jobs` and the agent) |
+| `pywget.client` | `ServerClient`: submit, control, `wait` / `wait_all` / `watch` (polling), `events` (SSE) |
 | `pywget.config` | Config file, token file and validation, `ServerConfig` |
 | `pywget.clipboard` | `c` input: clipboard and URL extraction |
 | `pywget.webui` | Embedded single-page web UI |
